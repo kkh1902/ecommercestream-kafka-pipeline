@@ -18,7 +18,9 @@ from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, LongType, IntegerType, StringType
 from pyspark.sql.functions import (
     from_json, col, when, coalesce, current_timestamp,
-    to_timestamp, row_number, monotonically_increasing_id
+    to_timestamp, row_number, monotonically_increasing_id,
+    hour, dayofweek, date_format, count, max as spark_max,
+    dense_rank, lag
 )
 from pyspark.sql.window import Window
 
@@ -181,6 +183,122 @@ class SparkStreamingConsumer:
             "event", "transactionid", "created_at"
         )
 
+    def prepare_statistics_events(self, df):
+        """statistics_events 테이블용 특성 추가 (통계/BI용)"""
+        logger.info("statistics_events 특성 추가 중...")
+
+        # timestamp를 UNIX milliseconds로 가정하고 변환
+        df_stats = df.withColumn(
+            "event_timestamp",
+            to_timestamp(col("timestamp") / 1000.0)
+        ).withColumn(
+            # 날짜 정보
+            "event_date",
+            date_format(col("event_timestamp"), "yyyy-MM-dd")
+        ).withColumn(
+            # 시간대 (0-23)
+            "hour_of_day",
+            hour(col("event_timestamp"))
+        ).withColumn(
+            # 요일 (1=Sunday, 7=Saturday)
+            "day_of_week",
+            dayofweek(col("event_timestamp"))
+        ).withColumn(
+            # 구매 여부 (transactionid 있으면 구매)
+            "is_purchase",
+            when(col("transactionid").isNotNull(), 1).otherwise(0)
+        )
+
+        # 최종 선택 (id는 이미 있음)
+        return df_stats.select(
+            "id", "timestamp", "visitorid", "itemid", "categoryid",
+            "event", "transactionid", "event_date", "hour_of_day",
+            "day_of_week", "is_purchase", "created_at"
+        )
+
+    def clean_and_prepare_ml_events(self, df):
+        """ml_prepared_events 테이블용 정제 및 특성 추가"""
+        logger.info("ml_prepared_events 정제 및 특성 추가 중...")
+
+        # 1. NULL 값 처리
+        df_cleaned = df.filter(
+            col("visitorid").isNotNull() &
+            col("itemid").isNotNull() &
+            col("event").isNotNull() &
+            col("timestamp").isNotNull() &
+            (col("timestamp") > 0)  # timestamp 유효성 확인
+        )
+
+        # 2. 특성 추가
+        df_features = df_cleaned.withColumn(
+            "event_timestamp",
+            to_timestamp(col("timestamp") / 1000.0)
+        ).withColumn(
+            # 사용자가 구매한 적이 있는지 (Window 함수)
+            "is_buyer",
+            when(
+                col("transactionid").isNotNull(),
+                1
+            ).otherwise(0)
+        ).withColumn(
+            # 이벤트 시간대
+            "event_hour",
+            hour(col("event_timestamp"))
+        ).withColumn(
+            # 요일
+            "event_dow",
+            dayofweek(col("event_timestamp"))
+        ).withColumn(
+            # 월
+            "event_month",
+            date_format(col("event_timestamp"), "MM")
+        )
+
+        # 3. Window 함수로 사용자 관점 특성 추가
+        # 사용자별 현재까지의 이벤트 수
+        user_window = Window.partitionBy("visitorid") \
+            .orderBy(col("timestamp").asc()) \
+            .rowsBetween(Window.unboundedPreceding, Window.currentRow)
+
+        df_user_features = df_features.withColumn(
+            "user_event_count",
+            count("*").over(user_window)
+        ).withColumn(
+            # 사용자의 첫 이벤트인지
+            "is_user_first_event",
+            when(col("user_event_count") == 1, 1).otherwise(0)
+        )
+
+        # 4. 상품 관점 특성 추가
+        # 상품별 현재까지의 이벤트 수
+        item_window = Window.partitionBy("itemid") \
+            .orderBy(col("timestamp").asc()) \
+            .rowsBetween(Window.unboundedPreceding, Window.currentRow)
+
+        df_item_features = df_user_features.withColumn(
+            "item_event_count",
+            count("*").over(item_window)
+        ).withColumn(
+            # 상품의 첫 이벤트인지
+            "is_item_first_event",
+            when(col("item_event_count") == 1, 1).otherwise(0)
+        )
+
+        # 최종 선택 (정제된 데이터 + 특성)
+        return df_item_features.select(
+            "id", "timestamp", "visitorid", "itemid", "categoryid",
+            "event", "transactionid",
+            # 정제 관련
+            "is_buyer",
+            # 시간 관련
+            "event_hour", "event_dow", "event_month",
+            # 사용자 관련 특성
+            "user_event_count", "is_user_first_event",
+            # 상품 관련 특성
+            "item_event_count", "is_item_first_event",
+            "created_at"
+        )
+
     def write_to_postgres(self, df, table_name, mode="append"):
         """PostgreSQL에 저장"""
         logger.info(f"PostgreSQL {table_name} 테이블에 저장 중...")
@@ -219,13 +337,17 @@ class SparkStreamingConsumer:
             # 5. Primary Key 추가
             df_with_id = self.add_primary_key(df_enriched)
 
-            # 6. 두 테이블에 저장
+            # 6. 각 테이블에 맞게 특성 추가 및 정제
+            df_stats_prepared = self.prepare_statistics_events(df_with_id)
+            df_ml_prepared = self.clean_and_prepare_ml_events(df_with_id)
+
+            # 7. 두 테이블에 저장
             logger.info("저장 시작: statistics_events, ml_prepared_events")
 
-            query_stats = self.write_to_postgres(df_with_id, "statistics_events")
-            query_ml = self.write_to_postgres(df_with_id, "ml_prepared_events")
+            query_stats = self.write_to_postgres(df_stats_prepared, "statistics_events")
+            query_ml = self.write_to_postgres(df_ml_prepared, "ml_prepared_events")
 
-            # 7. 스트림 실행
+            # 8. 스트림 실행
             logger.info("✅ Spark Streaming 시작")
             logger.info("Ctrl+C로 종료")
 
