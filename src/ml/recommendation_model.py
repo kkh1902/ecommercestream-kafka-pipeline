@@ -1,248 +1,260 @@
 """
-Recommendation Model
-간단한 협업 필터링 기반 추천 시스템
+추천 시스템 XGBoost 모델
+구매 확률 예측 모델 학습 및 저장
 """
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
+from pathlib import Path
 import numpy as np
-import pandas as pd
-from sklearn.metrics.pairwise import cosine_similarity
-from collections import defaultdict, Counter
-import pickle
-from datetime import datetime
+import joblib
+from sklearn.metrics import (
+    precision_score, recall_score, f1_score,
+    roc_auc_score, confusion_matrix, classification_report
+)
+import xgboost as xgb
+
+# 상위 디렉토리 경로 추가
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
-class RecommendationModel:
-    """추천 모델 클래스"""
+class RecommendationModelTrainer:
+    """XGBoost 기반 추천 모델 학습"""
 
-    def __init__(self):
-        self.user_item_matrix = None
-        self.item_similarity = None
-        self.item_popularity = None
-        self.trained = False
+    def __init__(self, model_save_path=None):
+        """
+        초기화
 
-    def fit(self, df):
-        """모델 학습"""
-        print("모델 학습 시작...")
+        Args:
+            model_save_path: 모델 저장 경로 (기본값: src/ml/models/)
+        """
+        if model_save_path is None:
+            model_save_path = project_root / "src" / "ml" / "models"
 
-        # 사용자-아이템 행렬 생성 (암시적 피드백)
-        # 이벤트 가중치: view=1, addtocart=2, transaction=3
-        event_weights = {'view': 1, 'addtocart': 2, 'transaction': 3}
-        df['weight'] = df['event'].map(event_weights)
+        self.model_save_path = Path(model_save_path)
+        self.model_save_path.mkdir(parents=True, exist_ok=True)
 
-        # 피벗 테이블 생성
-        self.user_item_matrix = df.pivot_table(
-            index='visitorid',
-            columns='itemid',
-            values='weight',
-            aggfunc='sum',
-            fill_value=0
+        self.model = None
+        self.feature_columns = None
+
+    def create_model(self, n_estimators=100, max_depth=6, learning_rate=0.1):
+        """
+        XGBoost 모델 생성
+
+        Args:
+            n_estimators: 부스팅 라운드 수
+            max_depth: 트리 최대 깊이
+            learning_rate: 학습률
+
+        Returns:
+            XGBClassifier 모델
+        """
+        logger.info("XGBoost 모델 생성 중...")
+
+        model = xgb.XGBClassifier(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            learning_rate=learning_rate,
+            scale_pos_weight=4,  # 클래스 불균형 처리 (구매:미구매 ~1:4)
+            random_state=42,
+            verbosity=1,
+            n_jobs=-1  # 병렬 처리
         )
 
-        print(f"사용자-아이템 행렬: {self.user_item_matrix.shape}")
+        logger.info(f"✅ 모델 생성 완료 (n_estimators={n_estimators}, max_depth={max_depth})")
 
-        # 아이템 유사도 계산 (코사인 유사도)
-        self.item_similarity = cosine_similarity(self.user_item_matrix.T)
-        self.item_similarity = pd.DataFrame(
-            self.item_similarity,
-            index=self.user_item_matrix.columns,
-            columns=self.user_item_matrix.columns
-        )
+        return model
 
-        print(f"아이템 유사도 행렬: {self.item_similarity.shape}")
+    def train(self, X_train, y_train, X_val=None, y_val=None):
+        """
+        모델 학습
 
-        # 아이템 인기도 계산
-        self.item_popularity = df.groupby('itemid').size().sort_values(ascending=False)
+        Args:
+            X_train: 훈련 특성
+            y_train: 훈련 타겟
+            X_val: 검증 특성 (선택사항)
+            y_val: 검증 타겟 (선택사항)
 
-        self.trained = True
-        print("모델 학습 완료!")
+        Returns:
+            학습된 모델
+        """
+        logger.info("=" * 60)
+        logger.info("XGBoost 모델 학습 시작")
+        logger.info("=" * 60)
 
-    def predict(self, user_id, n_recommendations=10):
-        """특정 사용자에게 상품 추천"""
-        if not self.trained:
-            raise ValueError("모델이 학습되지 않았습니다")
+        try:
+            # 모델 생성
+            self.model = self.create_model()
 
-        if user_id not in self.user_item_matrix.index:
-            # 신규 사용자: 인기 상품 추천
-            return self._recommend_popular(n_recommendations)
+            # Early stopping 세트 준비
+            eval_set = None
+            if X_val is not None and y_val is not None:
+                eval_set = [(X_val, y_val)]
+                eval_metric = ["logloss"]
+            else:
+                eval_metric = ["logloss"]
 
-        # 사용자가 이미 본 상품
-        user_items = self.user_item_matrix.loc[user_id]
-        seen_items = user_items[user_items > 0].index.tolist()
+            # 학습
+            self.model.fit(
+                X_train, y_train,
+                eval_set=eval_set,
+                eval_metric=eval_metric,
+                verbose=False
+            )
 
-        if len(seen_items) == 0:
-            return self._recommend_popular(n_recommendations)
+            logger.info("✅ 모델 학습 완료")
 
-        # 본 상품들과 유사한 상품 찾기
-        similar_items = []
-        for item in seen_items:
-            if item in self.item_similarity.index:
-                similar = self.item_similarity[item].sort_values(ascending=False)[1:n_recommendations+1]
-                similar_items.extend(similar.index.tolist())
+            return self.model
 
-        # 이미 본 상품 제외
-        recommended = [item for item in similar_items if item not in seen_items]
+        except Exception as e:
+            logger.error(f"모델 학습 실패: {e}", exc_info=True)
+            raise
 
-        # 중복 제거 및 빈도순 정렬
-        item_counts = Counter(recommended)
-        recommended = [item for item, count in item_counts.most_common(n_recommendations)]
+    def evaluate(self, X_test, y_test):
+        """
+        모델 평가
 
-        # 부족하면 인기 상품으로 채우기
-        if len(recommended) < n_recommendations:
-            popular = self._recommend_popular(n_recommendations - len(recommended), exclude=seen_items + recommended)
-            recommended.extend(popular)
+        Args:
+            X_test: 테스트 특성
+            y_test: 테스트 타겟
 
-        return recommended[:n_recommendations]
+        Returns:
+            평가 지표 딕셔너리
+        """
+        logger.info("=" * 60)
+        logger.info("모델 평가 중")
+        logger.info("=" * 60)
 
-    def _recommend_popular(self, n=10, exclude=None):
-        """인기 상품 추천"""
-        if exclude is None:
-            exclude = []
+        try:
+            # 예측
+            y_pred = self.model.predict(X_test)
+            y_pred_proba = self.model.predict_proba(X_test)[:, 1]
 
-        popular_items = [item for item in self.item_popularity.index if item not in exclude]
-        return popular_items[:n]
+            # 평가 지표
+            metrics = {
+                'accuracy': (y_pred == y_test).mean(),
+                'precision': precision_score(y_test, y_pred, zero_division=0),
+                'recall': recall_score(y_test, y_pred, zero_division=0),
+                'f1': f1_score(y_test, y_pred, zero_division=0),
+                'auc_roc': roc_auc_score(y_test, y_pred_proba)
+            }
 
-    def batch_predict(self, user_ids, n_recommendations=10):
-        """여러 사용자에게 배치 추천"""
-        results = {}
-        for user_id in user_ids:
-            results[user_id] = self.predict(user_id, n_recommendations)
-        return results
+            # 혼동 행렬
+            cm = confusion_matrix(y_test, y_pred)
+            tn, fp, fn, tp = cm.ravel()
+            metrics['tn'] = tn
+            metrics['fp'] = fp
+            metrics['fn'] = fn
+            metrics['tp'] = tp
 
-    def evaluate(self, test_df, n_recommendations=10):
-        """모델 평가"""
-        if not self.trained:
-            raise ValueError("모델이 학습되지 않았습니다")
+            # 로그 출력
+            logger.info(f"Accuracy:  {metrics['accuracy']:.4f}")
+            logger.info(f"Precision: {metrics['precision']:.4f}")
+            logger.info(f"Recall:    {metrics['recall']:.4f}")
+            logger.info(f"F1 Score:  {metrics['f1']:.4f}")
+            logger.info(f"AUC-ROC:   {metrics['auc_roc']:.4f}")
+            logger.info(f"\n혼동 행렬:")
+            logger.info(f"  TN={tn}, FP={fp}")
+            logger.info(f"  FN={fn}, TP={tp}")
+            logger.info("=" * 60)
 
-        print("모델 평가 중...")
+            return metrics, y_pred, y_pred_proba
 
-        # 테스트 데이터에서 실제 구매한 상품
-        actual_purchases = test_df[test_df['event'] == 'transaction'].groupby('visitorid')['itemid'].apply(list).to_dict()
+        except Exception as e:
+            logger.error(f"평가 실패: {e}", exc_info=True)
+            raise
 
-        hits = 0
-        total_users = 0
-        skipped_users = 0
+    def get_feature_importance(self, top_n=10):
+        """
+        특성 중요도 조회
 
-        for user_id, actual_items in actual_purchases.items():
-            # 학습 데이터에 있는 사용자만 평가 (Cold Start 문제)
-            if user_id not in self.user_item_matrix.index:
-                skipped_users += 1
-                continue
+        Args:
+            top_n: 상위 N개 특성
 
-            # 추천 상품
-            recommended = self.predict(user_id, n_recommendations)
+        Returns:
+            특성 중요도 (정렬됨)
+        """
+        if self.model is None:
+            logger.warning("학습된 모델이 없습니다")
+            return None
 
-            # Hit@N 계산
-            if any(item in recommended for item in actual_items):
-                hits += 1
-            total_users += 1
+        importance = self.model.feature_importances_
+        feature_names = self.model.get_booster().feature_names
 
-        hit_rate = hits / total_users if total_users > 0 else 0
+        # 정렬
+        indices = np.argsort(importance)[::-1][:top_n]
 
-        print(f"Hit Rate@{n_recommendations}: {hit_rate:.4f}")
-        print(f"평가 사용자 수: {total_users}")
-        print(f"  - 학습 데이터에 있는 사용자: {total_users}명")
-        print(f"  - 학습 데이터에 없는 사용자 (스킵): {skipped_users}명")
-        if total_users > 0:
-            print(f"  - Hit 수: {hits}명")
+        logger.info(f"\n상위 {top_n}개 중요 특성:")
+        for i, idx in enumerate(indices, 1):
+            logger.info(f"  {i}. {feature_names[idx]}: {importance[idx]:.4f}")
 
-        return hit_rate
+        return dict(zip([feature_names[i] for i in indices], importance[indices]))
 
-    def save(self, filepath='models/recommendation_model.pkl'):
-        """모델 저장"""
-        if not self.trained:
-            raise ValueError("모델이 학습되지 않았습니다")
+    def save_model(self, filename="recommendation_xgboost.pkl"):
+        """
+        모델 저장
 
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-
-        model_data = {
-            'user_item_matrix': self.user_item_matrix,
-            'item_similarity': self.item_similarity,
-            'item_popularity': self.item_popularity,
-            'trained': self.trained,
-            'saved_at': datetime.now().isoformat()
-        }
-
-        with open(filepath, 'wb') as f:
-            pickle.dump(model_data, f)
-
-        print(f"모델 저장 완료: {filepath}")
-
-    def load(self, filepath='models/recommendation_model.pkl'):
-        """모델 로드"""
-        if not os.path.exists(filepath):
-            raise FileNotFoundError(f"모델 파일을 찾을 수 없습니다: {filepath}")
-
-        with open(filepath, 'rb') as f:
-            model_data = pickle.load(f)
-
-        self.user_item_matrix = model_data['user_item_matrix']
-        self.item_similarity = model_data['item_similarity']
-        self.item_popularity = model_data['item_popularity']
-        self.trained = model_data['trained']
-
-        print(f"모델 로드 완료: {filepath}")
-        print(f"저장 시각: {model_data.get('saved_at', 'N/A')}")
-
-
-class ItemBasedCF(RecommendationModel):
-    """아이템 기반 협업 필터링 (별칭)"""
-    pass
-
-
-def main():
-    """메인 실행"""
-    from data_preparation import DataPreparation
-
-    print("=" * 60)
-    print("추천 모델 학습")
-    print("=" * 60)
-
-    # 데이터 전처리
-    prep = DataPreparation()
-
-    try:
-        # DB 연결 및 데이터 로드
-        if not prep.connect_db():
+        Args:
+            filename: 저장 파일명
+        """
+        if self.model is None:
+            logger.warning("저장할 모델이 없습니다")
             return
 
-        df = prep.load_data(limit=50000)  # 샘플 5만개로 학습
-        if df is None:
-            return
+        save_path = self.model_save_path / filename
 
-        # 학습/테스트 분할
-        train_df, test_df = prep.get_train_test_split()
+        try:
+            joblib.dump(self.model, save_path)
+            logger.info(f"✅ 모델 저장 완료: {save_path}")
 
-        # 모델 학습
-        model = RecommendationModel()
-        model.fit(train_df)
+        except Exception as e:
+            logger.error(f"모델 저장 실패: {e}", exc_info=True)
+            raise
 
-        # 모델 평가
-        hit_rate = model.evaluate(test_df, n_recommendations=10)
+    def load_model(self, filename="recommendation_xgboost.pkl"):
+        """
+        모델 로드
 
-        # 샘플 추천
-        print("\n샘플 추천 결과:")
-        sample_users = train_df['visitorid'].unique()[:5]
-        for user_id in sample_users:
-            recommendations = model.predict(user_id, n_recommendations=5)
-            print(f"  사용자 {user_id}: {recommendations}")
+        Args:
+            filename: 로드 파일명
 
-        # 모델 저장
-        model.save()
+        Returns:
+            로드된 모델
+        """
+        load_path = self.model_save_path / filename
 
-        print("\n" + "=" * 60)
-        print("추천 모델 학습 완료!")
-        print("=" * 60)
+        try:
+            self.model = joblib.load(load_path)
+            logger.info(f"✅ 모델 로드 완료: {load_path}")
+            return self.model
 
-    except Exception as e:
-        print(f"\n에러 발생: {e}")
-        raise
-    finally:
-        prep.close()
+        except Exception as e:
+            logger.error(f"모델 로드 실패: {e}", exc_info=True)
+            raise
 
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    # 테스트 예시
+    from recommendation_data import RecommendationDataPreparator
+
+    # 데이터 준비
+    preparator = RecommendationDataPreparator()
+    X_train, X_test, y_train, y_test, feature_cols = preparator.prepare(limit=10000)
+
+    # 모델 학습
+    trainer = RecommendationModelTrainer()
+    model = trainer.train(X_train, y_train)
+
+    # 평가
+    metrics, y_pred, y_pred_proba = trainer.evaluate(X_test, y_test)
+
+    # 특성 중요도
+    trainer.get_feature_importance(top_n=10)
+
+    # 저장
+    trainer.save_model()
