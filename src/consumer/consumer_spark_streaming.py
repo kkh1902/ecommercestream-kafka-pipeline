@@ -1,9 +1,8 @@
 """
 Kafka Consumer 2 (Spark Streaming)
 Kafka 데이터를 읽어서:
-1. statistics_events 테이블에 저장 (통계용)
-2. ml_prepared_events 테이블에 저장 (ML용)
-두 테이블 모두 item_properties에서 categoryid를 JOIN하여 추가
+1. statistics_events 테이블에 저장 (통계/BI용)
+item_properties에서 categoryid를 JOIN하여 추가
 """
 
 import sys
@@ -226,75 +225,6 @@ class SparkStreamingConsumer:
             "day_of_week", "is_purchase", "created_at"
         )
 
-    def clean_and_prepare_ml_events(self, df):
-        """ml_prepared_events 테이블용 정제 및 특성 추가"""
-        logger.info("ml_prepared_events 정제 및 특성 추가 중...")
-
-        # 1. NULL 값 처리 (정제)
-        df_cleaned = df.filter(
-            col("visitorid").isNotNull() &
-            col("itemid").isNotNull() &
-            col("event").isNotNull() &
-            col("timestamp").isNotNull() &
-            (col("timestamp") > 0)  # timestamp 유효성 확인
-        )
-
-        # 2. 특성 추가
-        df_features = df_cleaned.withColumn(
-            "event_timestamp",
-            to_timestamp(col("timestamp") / 1000.0)
-        ).withColumn(
-            # 구매 여부
-            "is_buyer",
-            when(
-                col("transactionid").isNotNull(),
-                1
-            ).otherwise(0)
-        ).withColumn(
-            # 이벤트 시간대 (0-23)
-            "event_hour",
-            hour(col("event_timestamp"))
-        ).withColumn(
-            # 요일 (1=Sunday, 7=Saturday)
-            "event_dow",
-            dayofweek(col("event_timestamp"))
-        ).withColumn(
-            # 월 (01-12)
-            "event_month",
-            date_format(col("event_timestamp"), "MM")
-        ).withColumn(
-            # 사용자별 누적 이벤트 수 (Streaming에서는 현재 배치 기준)
-            "user_event_count",
-            1  # 향후 상태 유지(state store)로 구현 필요
-        ).withColumn(
-            # 사용자의 첫 이벤트 여부 (추후 구현)
-            "is_user_first_event",
-            0  # 향후 상태 유지로 구현
-        ).withColumn(
-            # 상품별 누적 이벤트 수 (현재 배치 기준)
-            "item_event_count",
-            1  # 향후 상태 유지로 구현 필요
-        ).withColumn(
-            # 상품의 첫 이벤트 여부 (추후 구현)
-            "is_item_first_event",
-            0  # 향후 상태 유지로 구현
-        )
-
-        # 최종 선택 (정제된 데이터 + 특성)
-        return df_features.select(
-            "id", "timestamp", "visitorid", "itemid", "categoryid",
-            "event", "transactionid",
-            # 정제 관련
-            "is_buyer",
-            # 시간 관련
-            "event_hour", "event_dow", "event_month",
-            # 사용자 관련 특성
-            "user_event_count", "is_user_first_event",
-            # 상품 관련 특성
-            "item_event_count", "is_item_first_event",
-            "created_at"
-        )
-
     def write_to_postgres(self, df, table_name, mode="append"):
         """PostgreSQL에 저장"""
         logger.info(f"PostgreSQL {table_name} 테이블에 저장 중...")
@@ -333,15 +263,13 @@ class SparkStreamingConsumer:
             # 5. Primary Key 추가
             df_with_id = self.add_primary_key(df_enriched)
 
-            # 6. 각 테이블에 맞게 특성 추가 및 정제
+            # 6. 통계용 특성 추가
             df_stats_prepared = self.prepare_statistics_events(df_with_id)
-            df_ml_prepared = self.clean_and_prepare_ml_events(df_with_id)
 
-            # 7. 두 테이블에 저장
-            logger.info("저장 시작: statistics_events, ml_prepared_events")
+            # 7. 테이블에 저장
+            logger.info("저장 시작: statistics_events")
 
             query_stats = self.write_to_postgres(df_stats_prepared, "statistics_events")
-            query_ml = self.write_to_postgres(df_ml_prepared, "ml_prepared_events")
 
             # 8. 스트림 실행
             logger.info("✅ Spark Streaming 시작")
