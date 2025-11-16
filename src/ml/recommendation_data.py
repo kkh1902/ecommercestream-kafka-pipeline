@@ -39,9 +39,9 @@ class RecommendationDataPreparator:
         self.y_train = None
         self.y_test = None
 
-    def load_ml_prepared_events(self, limit=None):
+    def load_raw_events_and_prepare(self, limit=None):
         """
-        ml_prepared_events 데이터 로드
+        raw_events에서 데이터 로드 후 특성 준비
 
         Args:
             limit: 테스트용 샘플 크기 (None이면 전체)
@@ -49,15 +49,18 @@ class RecommendationDataPreparator:
         Returns:
             DataFrame
         """
-        logger.info("ml_prepared_events 로드 중...")
+        logger.info("raw_events 로드 및 준비 중...")
 
         query = """
             SELECT
-                id, timestamp, visitorid, itemid, categoryid, event,
-                transactionid, is_buyer, event_hour, event_dow, event_month,
-                user_event_count, is_user_first_event,
-                item_event_count, is_item_first_event
-            FROM ml_prepared_events
+                id, timestamp, visitorid, itemid, event,
+                transactionid
+            FROM raw_events
+            WHERE
+                timestamp > 0
+                AND visitorid IS NOT NULL
+                AND itemid IS NOT NULL
+                AND event IS NOT NULL
             ORDER BY timestamp ASC
         """
 
@@ -66,12 +69,63 @@ class RecommendationDataPreparator:
 
         try:
             df = pd.read_sql(query, self.postgres_url)
-            logger.info(f"✅ {len(df)}개 레코드 로드 완료")
+            logger.info(f"✅ {len(df)}개 원본 레코드 로드 완료")
+
+            # 데이터 정제 및 특성 생성
+            df = self._prepare_raw_data(df)
+
             return df
 
         except Exception as e:
             logger.error(f"데이터 로드 실패: {e}", exc_info=True)
             raise
+
+    def _prepare_raw_data(self, df):
+        """
+        raw_events 데이터 정제 및 특성 생성
+
+        Args:
+            df: raw_events DataFrame
+
+        Returns:
+            정제 및 특성이 추가된 DataFrame
+        """
+        logger.info("데이터 정제 및 특성 생성 중...")
+
+        df = df.copy()
+
+        # 1. 시간 관련 특성 추가
+        df['event_timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+        df['event_date'] = df['event_timestamp'].dt.strftime('%Y-%m-%d')
+        df['event_hour'] = df['event_timestamp'].dt.hour
+        df['event_dow'] = df['event_timestamp'].dt.dayofweek + 1  # 1-7
+        df['event_month'] = df['event_timestamp'].dt.month
+
+        # 2. 구매 여부 (1 if transactionid is not null, 0 otherwise)
+        df['is_buyer'] = (~df['transactionid'].isna()).astype(int)
+
+        # 3. 사용자별 누적 이벤트 수
+        df['user_event_count'] = df.groupby('visitorid').cumcount() + 1
+        df['is_user_first_event'] = (df['user_event_count'] == 1).astype(int)
+
+        # 4. 상품별 누적 이벤트 수
+        df['item_event_count'] = df.groupby('itemid').cumcount() + 1
+        df['is_item_first_event'] = (df['item_event_count'] == 1).astype(int)
+
+        # 5. categoryid 추가 (item_properties에서 JOIN)
+        # 먼저 item_properties 로드
+        try:
+            category_query = "SELECT itemid, categoryid FROM item_properties"
+            categories = pd.read_sql(category_query, self.postgres_url)
+            df = df.merge(categories, on='itemid', how='left')
+            logger.info(f"✅ 카테고리 정보 JOIN 완료")
+        except Exception as e:
+            logger.warning(f"카테고리 JOIN 실패 (item_properties 테이블 없을 수 있음): {e}")
+            df['categoryid'] = np.nan
+
+        logger.info(f"✅ 데이터 정제 및 특성 생성 완료 ({len(df)} 레코드)")
+
+        return df
 
     def split_train_test(self, df, train_ratio=0.8):
         """
@@ -99,23 +153,25 @@ class RecommendationDataPreparator:
         특성 준비 및 엔지니어링
 
         Args:
-            df: 데이터프레임
+            df: 데이터프레임 (raw_events로부터 준비된)
 
         Returns:
-            특성만 추출한 DataFrame
+            특성만 추출한 DataFrame, 특성 컬럼 목록
         """
         logger.info("특성 준비 중...")
 
         df_features = df.copy()
 
         # 1. 범주형 변수 인코딩
-        # visitorid, itemid, categoryid는 그대로 사용 (수치형)
-        # event는 범주형이면 인코딩
-        if df_features['event'].dtype == 'object':
-            event_encoder = LabelEncoder()
-            df_features['event_encoded'] = event_encoder.fit_transform(df_features['event'])
+        # event 컬럼을 숫자로 인코딩
+        if 'event' in df_features.columns:
+            if df_features['event'].dtype == 'object':
+                event_encoder = LabelEncoder()
+                df_features['event_encoded'] = event_encoder.fit_transform(df_features['event'])
+            else:
+                df_features['event_encoded'] = df_features['event']
         else:
-            df_features['event_encoded'] = df_features['event']
+            df_features['event_encoded'] = 0
 
         # 2. 선택할 특성 목록
         feature_columns = [
@@ -130,13 +186,16 @@ class RecommendationDataPreparator:
             'is_user_first_event',
             'item_event_count',
             'is_item_first_event',
-            'is_buyer'  # 이전 구매 여부 (특성)
+            'is_buyer'  # 구매 여부 (타겟)
         ]
 
-        # 3. NULL 값 처리
+        # 3. NULL 값 처리 (categoryid는 item_properties에서 JOIN 실패 시 NaN이 될 수 있음)
         for col in feature_columns:
             if col in df_features.columns:
                 df_features[col] = df_features[col].fillna(0)
+            else:
+                logger.warning(f"컬럼 '{col}'이(가) 데이터프레임에 없습니다. 0으로 채웁니다.")
+                df_features[col] = 0
 
         logger.info(f"✅ {len(feature_columns)}개 특성 준비 완료")
 
@@ -187,8 +246,8 @@ class RecommendationDataPreparator:
         logger.info("=" * 60)
 
         try:
-            # 1. 데이터 로드
-            df = self.load_ml_prepared_events(limit=limit)
+            # 1. 데이터 로드 및 준비
+            df = self.load_raw_events_and_prepare(limit=limit)
 
             # 2. Train/Test 분할
             df_train, df_test = self.split_train_test(df, train_ratio=train_ratio)
