@@ -1,0 +1,66 @@
+graph TB
+    subgraph Ingestion["📥 Data Ingestion"]
+        P["Producer<br/>(producer.py)<br/>CSV → Kafka"]
+    end
+
+    subgraph Messaging["📨 Message Broker"]
+        T["Apache Kafka<br/>Topic: clickstream"]
+    end
+
+    subgraph Streaming["🔄 Real-time Streaming"]
+        C1["Consumer 1<br/>(consumer_postgres.py)<br/>원본 저장"]
+        C2["Consumer 2<br/>(consumer_spark_streaming.py)<br/>통계 처리"]
+    end
+
+    subgraph Storage["💾 Data Storage - PostgreSQL"]
+        RAW["raw_events<br/>(원본)"]
+        STATS["statistics_events<br/>(통계/BI용)"]
+    end
+
+    subgraph BatchML["⚙️ Batch Processing - Airflow"]
+        DAG1["data_quality_management<br/>(매일 새벽 1시)<br/>데이터 품질 검증"]
+        DAG3["daily_statistics_management<br/>(매일 새벽 3시)<br/>통계 집계"]
+        DAG4["ml_training_pipeline<br/>(매주 월요일 새벽 4시)<br/>추천 모델 학습"]
+    end
+
+    subgraph ML["🤖 Machine Learning"]
+        MLDATA["recommendation_data.py<br/>데이터 준비"]
+        MLMODEL["recommendation_model.py<br/>XGBoost 학습"]
+        MLEVAL["recommendation_metrics.py<br/>평가 지표"]
+        MLENGINE["recommendation_engine.py<br/>추천 생성"]
+    end
+
+    subgraph Analytics["📈 Analytics & BI"]
+        DASH["BI Dashboard<br/>통계 시각화"]
+    end
+
+    P -->|Kafka Protocol| T
+    T -->|Subscribe| C1
+    T -->|Subscribe| C2
+
+    C1 -->|Batch Insert| RAW
+    C2 -->|특성 추가| STATS
+
+    RAW --> DAG1
+    RAW --> DAG3
+    RAW --> DAG4
+
+    DAG4 -->|raw_events 읽기| MLDATA
+    MLDATA -->|특성 엔지니어링| MLMODEL
+    MLMODEL -->|평가| MLEVAL
+    MLEVAL -->|확률 계산| MLENGINE
+
+    STATS --> DASH
+
+    style P fill:#e1f5ff
+    style C1 fill:#e1f5ff
+    style C2 fill:#fff9c4
+    style RAW fill:#f0f0f0
+    style STATS fill:#f0f0f0
+    style DAG1 fill:#ffe0b2
+    style DAG3 fill:#ffe0b2
+    style DAG4 fill:#c8e6c9
+    style MLDATA fill:#c8e6c9
+    style MLMODEL fill:#c8e6c9
+    style MLEVAL fill:#c8e6c9
+    style MLENGINE fill:#c8e6c9
