@@ -21,10 +21,14 @@ from config.settings import (
 )
 from src.utils.logger import get_logger
 from src.utils.kafka_utils import create_kafka_producer
-from src.producer.error_logger import log_failed_message, get_failed_message_count
+from pathlib import Path
+
+# 로그 디렉토리 생성
+log_dir = Path("logs/producer")
+log_dir.mkdir(parents=True, exist_ok=True)
 
 # 로거 설정
-logger = get_logger(__name__)
+logger = get_logger(__name__, log_file=str(log_dir / "producer.log"))
 
 
 
@@ -86,17 +90,8 @@ def send_messages(producer, df, topic, interval=4, batch_mode=False):
             # Kafka가 3번 재시도 후에도 실패한 경우
             send_error += 1
 
-            # 로컬 파일에 저장
-            log_failed_message(
-                message=message,
-                error=e,
-                index=idx,
-                partition_key=partition_key
-            )
-
-            # 처음 3개만 콘솔 출력
-            if send_error <= 3:
-                logger.warning(f"전송 실패 [{idx}]: {type(e).__name__}: {e}")
+            # 에러 로그 기록
+            logger.error(f"전송 실패 [{idx}]: {type(e).__name__}: {e}", exc_info=False)
 
             continue
 
@@ -105,12 +100,7 @@ def send_messages(producer, df, topic, interval=4, batch_mode=False):
     logger.info(f"전송 성공: {success_count}개")
     if send_error > 0:
         logger.warning(f"전송 실패: {send_error}개")
-        logger.warning(f"에러 로그 위치: logs/failed_messages/")
-
-        # 오늘 저장된 실패 메시지 개수 확인
-        total_failed = get_failed_message_count()
-        if total_failed > 0:
-            logger.warning(f"오늘 총 실패 메시지: {total_failed}개")
+        logger.warning(f"에러 로그 위치: logs/producer/producer.log")
     logger.info(f"전체: {len(df)}개")
     logger.info("=" * 50)
 

@@ -2,7 +2,7 @@
 Category Tree 데이터를 PostgreSQL에 로드
 """
 
-import psycopg2
+import psycopg2 # (PostgreSQL)
 import sys
 import os
 

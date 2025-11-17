@@ -1,12 +1,23 @@
--- E-commerce Clickstream 테이블 생성
-
-CREATE TABLE IF NOT EXISTS clickstream_events (
+-- 원본 클릭스트림 데이터 (Kafka Consumer에서 저장)
+CREATE TABLE IF NOT EXISTS raw_clickstream_events (
     id SERIAL PRIMARY KEY,
     timestamp BIGINT NOT NULL,
     visitorid INTEGER NOT NULL,
     event VARCHAR(50) NOT NULL,
     itemid INTEGER NOT NULL,
     transactionid INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 처리된 클릭스트림 데이터 (Spark Streaming에서 저장)
+CREATE TABLE IF NOT EXISTS clickstream_events (
+    id SERIAL PRIMARY KEY,
+    timestamp TIMESTAMP NOT NULL,
+    visitorid INTEGER NOT NULL,
+    event VARCHAR(50) NOT NULL,
+    itemid INTEGER NOT NULL,
+    transactionid INTEGER,
+    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -26,65 +37,53 @@ SELECT
 FROM clickstream_events
 GROUP BY event;
 
--- ===== Spark Streaming 실시간 통계 테이블 =====
+-- 카테고리 트리 (상품 카테고리 계층 구조)
+CREATE TABLE IF NOT EXISTS category_tree (
+    categoryid INTEGER PRIMARY KEY,
+    parentid INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
--- 윈도우 기반 집계 통계 (5분 단위)
-CREATE TABLE IF NOT EXISTS windowed_stats (
+CREATE INDEX IF NOT EXISTS idx_category_parentid ON category_tree(parentid);
+
+-- 상품 속성 (아이템별 속성 정보)
+CREATE TABLE IF NOT EXISTS item_properties (
     id SERIAL PRIMARY KEY,
-    window_start TIMESTAMP NOT NULL,
-    window_end TIMESTAMP NOT NULL,
-    event VARCHAR(50) NOT NULL,
-    event_count BIGINT NOT NULL,
-    unique_users BIGINT NOT NULL,
-    unique_items BIGINT NOT NULL,
+    timestamp BIGINT,
+    itemid BIGINT NOT NULL,
+    property VARCHAR(100),
+    value TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_item_itemid ON item_properties(itemid);
+CREATE INDEX IF NOT EXISTS idx_item_property ON item_properties(property);
+
+-- 일일 통계 (매일 새벽 2시에 집계)
+CREATE TABLE IF NOT EXISTS daily_statistics (
+    id SERIAL PRIMARY KEY,
+    stats_date DATE NOT NULL UNIQUE,
+    total_sales INT,
+    total_events INT,
+    unique_visitors INT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(window_start, window_end, event)
-);
-
--- 임시 테이블 (Spark에서 UPSERT용)
-CREATE TABLE IF NOT EXISTS windowed_stats_temp (
-    window_start TIMESTAMP NOT NULL,
-    window_end TIMESTAMP NOT NULL,
-    event VARCHAR(50) NOT NULL,
-    event_count BIGINT NOT NULL,
-    unique_users BIGINT NOT NULL,
-    unique_items BIGINT NOT NULL
-);
-
--- 인덱스 생성
-CREATE INDEX IF NOT EXISTS idx_windowed_stats_window ON windowed_stats(window_start, window_end);
-CREATE INDEX IF NOT EXISTS idx_windowed_stats_event ON windowed_stats(event);
-
--- 실시간 이벤트별 통계 (전체 누적)
-CREATE TABLE IF NOT EXISTS event_statistics (
-    id SERIAL PRIMARY KEY,
-    event VARCHAR(50) NOT NULL UNIQUE,
-    total_count BIGINT NOT NULL,
-    unique_visitors BIGINT NOT NULL,
-    unique_items BIGINT NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 실시간 지표 조회용 뷰
-CREATE OR REPLACE VIEW realtime_metrics AS
-SELECT
-    window_start,
-    window_end,
-    event,
-    event_count,
-    unique_users,
-    unique_items
-FROM windowed_stats
-WHERE window_start >= NOW() - INTERVAL '1 hour'
-ORDER BY window_start DESC, event;
+CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_statistics(stats_date);
 
--- 최근 통계 요약 뷰
-CREATE OR REPLACE VIEW latest_stats AS
-SELECT
-    event,
-    total_count,
-    unique_visitors,
-    unique_items,
-    updated_at
-FROM event_statistics
-ORDER BY total_count DESC;
+-- 데이터 품질 검증 결과 저장 테이블
+CREATE TABLE IF NOT EXISTS data_quality_results (
+    id SERIAL PRIMARY KEY,
+    check_date DATE NOT NULL,
+    table_name VARCHAR(100) NOT NULL,
+    total_records BIGINT,
+    quality_score FLOAT,
+    status VARCHAR(20),
+    null_count INT,
+    invalid_count INT,
+    details TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_dq_table_date ON data_quality_results(table_name, check_date);

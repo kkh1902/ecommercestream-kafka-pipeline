@@ -10,6 +10,12 @@ data/error/
 .env
 *.log
 
+# Logs (keep directory structure, ignore log files)
+logs/*/*.log                 # 모든 하위 폴더의 .log 파일
+logs/*/*.jsonl               # 모든 하위 폴더의 .jsonl 파일
+logs/*.log
+logs/*.jsonl
+
 # Python
 __pycache__/
 *.pyc
@@ -37,6 +43,10 @@ hadoop/
 models/*.pkl
 models/*.joblib
 
+# ML
+src/ml/
+airflow/dags/ml_training_pipeline.py
+
 # Docker volumes
 postgres-data/
 postgres-airflow-data/
@@ -48,4 +58,4 @@ frontend/out/
 
 # OS
 .DS_Store
-Thumbs.dbfrontend/
+Thumbs.db

@@ -1,27 +1,25 @@
-# Spark Streaming Consumer Dockerfile
-FROM python:3.10-slim
+# Spark Batch Processing Image
 
-# Java 설치 (Spark 실행에 필요)
-RUN apt-get update && \
-    apt-get install -y openjdk-21-jre-headless procps && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+FROM apache/spark:3.5.0-python3
 
-# 작업 디렉토리 설정
+USER root
+
 WORKDIR /app
 
-# Python 패키지 설치
-COPY ../requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# 소스 코드 복사
+COPY . /app
 
-# 프로젝트 파일 복사
-COPY ../config ./config
-COPY ../src/spark ./src/spark
-COPY ../sql ./sql
+# Python 패키지 설치 (최소 패키지만 설치)
+RUN pip install --no-cache-dir \
+    python-dotenv==1.0.0 \
+    psycopg2-binary==2.9.9 \
+    requests
 
-# JAVA_HOME 환경변수 설정
-ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
-ENV PATH="${JAVA_HOME}/bin:${PATH}"
+# Spark 환경변수 설정
+ENV SPARK_HOME=/opt/spark
+ENV PATH=$SPARK_HOME/bin:$PATH
 
-# Spark 실행
-CMD ["python", "-u", "src/spark/streaming_consumer.py"]
+# Spark Streaming 실행 (로컬 JAR 파일 사용)
+CMD ["spark-submit", \
+     "--jars", "/app/src/spark/jars/postgresql-42.6.0.jar,/app/src/spark/jars/spark-sql-kafka-0-10_2.12-3.5.0.jar,/app/src/spark/jars/kafka-clients-3.5.1.jar,/app/src/spark/jars/commons-lang3-3.12.0.jar,/app/src/spark/jars/commons-pool2-2.11.1.jar", \
+     "/app/src/spark/jobs/streaming_consumer.py"]
