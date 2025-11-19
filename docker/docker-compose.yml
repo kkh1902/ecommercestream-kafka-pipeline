@@ -28,6 +28,7 @@ services:
     ports:
       - "9092:9092"
       - "19092:19092"
+      - "9999:9999"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -39,6 +40,8 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_JMX_PORT: 9999
+      KAFKA_JMX_HOSTNAME: kafka-broker-1
     networks:
       - kafka-network
     healthcheck:
@@ -57,6 +60,7 @@ services:
     ports:
       - "9093:9093"
       - "19093:19093"
+      - "9998:9998"
     environment:
       KAFKA_BROKER_ID: 2
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -68,6 +72,8 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_JMX_PORT: 9998
+      KAFKA_JMX_HOSTNAME: kafka-broker-2
     networks:
       - kafka-network
     healthcheck:
@@ -86,6 +92,7 @@ services:
     ports:
       - "9094:9094"
       - "19094:19094"
+      - "9997:9997"
     environment:
       KAFKA_BROKER_ID: 3
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -97,6 +104,8 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_JMX_PORT: 9997
+      KAFKA_JMX_HOSTNAME: kafka-broker-3
     networks:
       - kafka-network
     healthcheck:
@@ -150,7 +159,7 @@ services:
   airflow-webserver:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.airflow
+      dockerfile: docker/airflow/Dockerfile
     container_name: airflow-webserver
     depends_on:
       postgres-airflow:
@@ -177,6 +186,7 @@ services:
       - "8080:8080"
     networks:
       - kafka-network
+    command: webserver
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 30s
@@ -186,11 +196,11 @@ services:
   airflow-scheduler:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.airflow
+      dockerfile: docker/airflow/Dockerfile
     container_name: airflow-scheduler
     depends_on:
       airflow-webserver:
-        condition: service_healthy
+        condition: service_started
       postgres:
         condition: service_healthy
     environment:
@@ -204,7 +214,7 @@ services:
       - ../airflow/logs:/opt/airflow/logs
       - ../airflow/plugins:/opt/airflow/plugins
       - ..:/opt/airflow/project
-    command: airflow scheduler
+    command: scheduler
     networks:
       - kafka-network
 
@@ -261,7 +271,7 @@ services:
   producer:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.producer
+      dockerfile: docker/producer/Dockerfile
     container_name: producer
     depends_on:
       kafka-broker-1:
@@ -284,7 +294,7 @@ services:
   consumer-postgres:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.consumer
+      dockerfile: docker/consumer/Dockerfile
     container_name: consumer-postgres
     depends_on:
       kafka-broker-1:
@@ -309,11 +319,11 @@ services:
       - kafka-network
     restart: unless-stopped
 
-  # ===== Spark Batch Job =====
+  # ===== Spark Streaming Consumer =====
   spark-streaming:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.spark
+      dockerfile: docker/spark/Dockerfile
     container_name: spark-streaming
     depends_on:
       kafka-broker-1:
@@ -338,10 +348,10 @@ services:
       - ../airflow:/app/airflow
       - ../requirements.txt:/app/requirements.txt
       - ../logs:/app/logs
-    command: spark-submit --master local --jars /app/src/spark/jars/postgresql-42.6.0.jar,/app/src/spark/jars/spark-sql-kafka-0-10_2.12-3.5.0.jar,/app/src/spark/jars/kafka-clients-3.5.1.jar,/app/src/spark/jars/commons-lang3-3.12.0.jar,/app/src/spark/jars/commons-pool2-2.11.1.jar /app/src/spark/jobs/spark_jobs/batch_statistics.py
+    command: spark-submit --master local[*] --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.2,org.postgresql:postgresql:42.6.0 /app/src/consumer/streaming_consumer.py
     networks:
       - kafka-network
-    restart: on-failure
+    restart: unless-stopped
 
   # ===== Kafka UI =====
   kafka-ui:
@@ -363,63 +373,6 @@ services:
     networks:
       - kafka-network
 
-  # ===== Monitoring (ELK Stack) =====
-  elasticsearch:
-    image: elasticsearch:7.17.0
-    container_name: elasticsearch
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-      - logger.level=WARN
-    ports:
-      - "9200:9200"
-    volumes:
-      - elasticsearch-data:/usr/share/elasticsearch/data
-    networks:
-      - kafka-network
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9200 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  kibana:
-    image: kibana:7.17.0
-    container_name: kibana
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-    ports:
-      - "5601:5601"
-    depends_on:
-      elasticsearch:
-        condition: service_healthy
-    networks:
-      - kafka-network
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  filebeat:
-    image: elastic/filebeat:7.17.0
-    container_name: filebeat
-    user: root
-    command: filebeat -e -strict.perms=false
-    volumes:
-      - ../filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
-      - ../logs:/logs:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-    depends_on:
-      elasticsearch:
-        condition: service_healthy
-    networks:
-      - kafka-network
-
 networks:
   kafka-network:
     driver: bridge
@@ -427,4 +380,3 @@ networks:
 volumes:
   postgres-data:
   postgres-airflow-data:
-  elasticsearch-data:

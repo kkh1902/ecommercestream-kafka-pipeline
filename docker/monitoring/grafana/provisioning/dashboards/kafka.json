@@ -1,0 +1,63 @@
+{
+  "dashboard": {
+    "title": "Kafka Monitoring",
+    "tags": ["kafka", "monitoring"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "title": "Kafka Brokers Status",
+        "targets": [
+          {
+            "expr": "kafka_brokers"
+          }
+        ],
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4}
+      },
+      {
+        "title": "Kafka Topics",
+        "targets": [
+          {
+            "expr": "count(kafka_topic_partitions)"
+          }
+        ],
+        "type": "stat",
+        "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4}
+      },
+      {
+        "title": "Consumer Group Lag",
+        "targets": [
+          {
+            "expr": "kafka_consumergroup_lag"
+          }
+        ],
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8}
+      },
+      {
+        "title": "Clickstream Topic Messages",
+        "targets": [
+          {
+            "expr": "rate(kafka_topic_partition_current_offset{topic=\"clickstream\"}[1m])"
+          }
+        ],
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8}
+      },
+      {
+        "title": "Bytes In/Out Rate",
+        "targets": [
+          {
+            "expr": "rate(kafka_server_brokertopicmetrics_messagesin_total[1m])"
+          }
+        ],
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 20, "w": 12, "h": 8}
+      }
+    ],
+    "schemaVersion": 27,
+    "version": 1,
+    "refresh": "30s"
+  },
+  "overwrite": true
+}

@@ -48,7 +48,7 @@ spark_conf = {
 # spark dag submit operator 최적화 할려면?
 t_batch_statistics = SparkSubmitOperator(
     task_id='collect_daily_statistics',
-    application=f'{PROJECT_ROOT}/airflow/dags/spark_jobs/batch_statistics.py',  # python script 경로
+    application=f'{PROJECT_ROOT}/src/spark/jobs/spark_jobs/batch_statistics.py',  # python script 경로
     conf=spark_conf,
     packages='org.postgresql:postgresql:42.6.0', # Spark가 JDBC로 PostgreSQL에 붙을 때 필요한 드라이버
     jars=f'{PROJECT_ROOT}/src/spark/jars/postgresql-42.7.3.jar', # 로컬에 있는 jar 파일도 추가로 넣어줌

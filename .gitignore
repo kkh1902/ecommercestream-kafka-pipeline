@@ -27,6 +27,7 @@ venv/
 .vscode/
 .idea/
 *.swp
+.claude/
 
 # Airflow
 airflow/logs/

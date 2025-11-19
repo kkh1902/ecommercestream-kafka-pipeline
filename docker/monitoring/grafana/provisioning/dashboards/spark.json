@@ -1,0 +1,76 @@
+{
+  "dashboard": {
+    "title": "Spark Streaming Monitoring",
+    "tags": ["spark", "streaming", "monitoring"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "title": "Total Records Processed",
+        "targets": [
+          {
+            "expr": "spark_streaming_streaming_total_records_processed"
+          }
+        ],
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4}
+      },
+      {
+        "title": "Active Batches",
+        "targets": [
+          {
+            "expr": "spark_streaming_streaming_active_batches"
+          }
+        ],
+        "type": "stat",
+        "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4}
+      },
+      {
+        "title": "Batches Submitted",
+        "targets": [
+          {
+            "expr": "rate(spark_streaming_streaming_batch_number[1m])"
+          }
+        ],
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8}
+      },
+      {
+        "title": "Records Input/Output Rate",
+        "targets": [
+          {
+            "expr": "rate(spark_streaming_streaming_records_input_rate[1m])"
+          },
+          {
+            "expr": "rate(spark_streaming_streaming_records_output_rate[1m])"
+          }
+        ],
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8}
+      },
+      {
+        "title": "Batch Processing Time (ms)",
+        "targets": [
+          {
+            "expr": "spark_streaming_streaming_batch_duration_total"
+          }
+        ],
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 20, "w": 12, "h": 8}
+      },
+      {
+        "title": "Total Delay (ms)",
+        "targets": [
+          {
+            "expr": "spark_streaming_streaming_total_delay"
+          }
+        ],
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 28, "w": 12, "h": 8}
+      }
+    ],
+    "schemaVersion": 27,
+    "version": 1,
+    "refresh": "30s"
+  },
+  "overwrite": true
+}

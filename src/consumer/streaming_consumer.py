@@ -14,8 +14,8 @@ import os
 import traceback
 from pathlib import Path
 
-# 상위 디렉토리 경로 추가
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+# 상위 디렉토리 경로 추가 (/app 디렉토리를 Python path에 추가)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from config.settings import (
     KAFKA_BROKERS,
@@ -53,9 +53,6 @@ class StreamingConsumer:
 
         self.spark = SparkSession.builder \
             .appName("Clickstream Processor") \
-            .config("spark.jars.packages",
-                   "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
-                   "org.postgresql:postgresql:42.6.0") \
             .config("spark.sql.streaming.checkpointLocation", "/tmp/spark-checkpoint") \
             .config("spark.sql.adaptive.enabled", "true") \
             .master("local[*]") \

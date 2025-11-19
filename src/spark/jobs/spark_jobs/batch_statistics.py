@@ -20,8 +20,6 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, count, countDistinct, date_format
 
 # 프로젝트 경로 설정
-# 현재 파일의 경로: src/spark/jobs/spark_jobs/batch_statistics.py
-# 프로젝트 루트: ../../../../.. (5단계 위)
 current_file = Path(__file__).resolve()
 PROJECT_ROOT = current_file.parent.parent.parent.parent.parent
 
@@ -115,6 +113,8 @@ def main():
             ORDER BY event_date DESC
         """)
 
+        # SQL_Injection 위험?
+
         # 결과 확인
         results = result_df.collect()
         print(f"  총 {len(results)}일의 데이터 처리")
@@ -135,6 +135,11 @@ def main():
             .option("driver", "org.postgresql.Driver") \
             .mode("append") \
             .save()
+        
+        ## 중복체크는 안되는거 아닌가?
+        # 같은 날짜의 통계가 또 들어오면?
+        # DAG 재실행하면? 
+        # 실패 알림 추가해야함 Slack
 
         print(f"{len(results)}개 행 저장 완료")
 

@@ -1,6 +1,6 @@
 # Spark Batch Processing Image
 
-FROM apache/spark:3.5.0-python3
+FROM apache/spark:3.4.2-python3
 
 USER root
 
@@ -8,6 +8,9 @@ WORKDIR /app
 
 # 소스 코드 복사
 COPY . /app
+
+# Python symlink 생성 (spark가 python을 찾을 수 있도록)
+RUN ln -s /usr/bin/python3 /usr/bin/python
 
 # Python 패키지 설치 (최소 패키지만 설치)
 RUN pip install --no-cache-dir \
