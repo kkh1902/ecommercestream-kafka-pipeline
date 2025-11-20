@@ -1,39 +1,35 @@
-#!/usr/bin/env python3
 """
-Kafka Performance Test Suite
+Kafka 성능 테스트
 
-용도: Kafka Producer와 Consumer의 성능을 측정합니다.
+목적: Kafka Producer와 Consumer의 성능을 측정합니다.
 
-사용법:
-    python run_kafka_perf_tests.py --producer --num-records 100000
-    python run_kafka_perf_tests.py --consumer --num-messages 100000
-    python run_kafka_perf_tests.py --all
+사용 예시:
+    python run_kafka_perf_tests.py --producer
+    python run_kafka_perf_tests.py --producer --num-records 100000 --record-size 1024 --acks all
+    python run_kafka_perf_tests.py --consumer
+    python run_kafka_perf_tests.py --consumer --num-messages 100000 --timeout 120000
 """
 
 import subprocess
 import argparse
+import re
 import time
 from datetime import datetime
-from pathlib import Path
 
 
 class KafkaPerfTest:
-    """Kafka Performance Test Runner"""
+    """Kafka 성능 테스트"""
 
-    def __init__(self):
-        self.results = []
-        self.test_dir = Path(__file__).parent
-
-    def run_producer_test(self, num_records=100000, record_size=1024, acks="all"):
-        """Run Kafka Producer Performance Test"""
+    def producer_test(self, num_records=100000, record_size=1024, acks="all"):
+        """Kafka Producer 성능 테스트 실행"""
         print("\n" + "="*60)
-        print("🚀 Kafka Producer Performance Test")
+        print("Kafka Producer 성능 테스트")
         print("="*60)
-        print(f"📊 Configuration:")
-        print(f"   - Records: {num_records:,}")
-        print(f"   - Record Size: {record_size} bytes")
-        print(f"   - Acks: {acks}")
-        print(f"   - Start Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"설정:")
+        print(f"   - 메시지 개수: {num_records:,}개")
+        print(f"   - 메시지 크기: {record_size} bytes")
+        print(f"   - Acks 설정: {acks}")
+        print(f"   - 시작 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print("="*60)
 
         cmd = [
@@ -54,32 +50,23 @@ class KafkaPerfTest:
 
         print(result.stdout)
         if result.stderr:
-            print("[STDERR]", result.stderr)
+            print("에러", result.stderr)
 
-        print(f"\n⏱️  Total Execution Time: {elapsed_time:.2f} seconds")
+        # 결과를 표 형식으로 파싱해서 출력
+        self._parse_and_print_producer_result(result.stdout, elapsed_time)
 
-        return {
-            "test": "producer",
-            "num_records": num_records,
-            "record_size": record_size,
-            "acks": acks,
-            "status": "SUCCESS" if result.returncode == 0 else "FAILED",
-            "timestamp": datetime.now().isoformat(),
-            "execution_time": elapsed_time
-        }
-
-    def run_consumer_test(self, num_messages=100000, timeout_ms=120000):
-        """Run Kafka Consumer Performance Test"""
+    def consumer_test(self, num_messages=100000, timeout_ms=120000):
+        """Kafka Consumer 성능 테스트 실행"""
         print("\n" + "="*60)
-        print("📥 Kafka Consumer Performance Test")
+        print("Kafka Consumer 성능 테스트")
         print("="*60)
-        print(f"📊 Configuration:")
-        print(f"   - Messages: {num_messages:,}")
-        print(f"   - Timeout: {timeout_ms} ms")
-        print(f"   - Start Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"설정:")
+        print(f"   - 메시지 개수: {num_messages:,}개")
+        print(f"   - 타임아웃: {timeout_ms} ms")
+        print(f"   - 시작 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print("="*60)
-        print("\n⚠️  Make sure Producer test has completed!")
-        print("    Consumer needs data in the topic to read.\n")
+        print("\nProducer 테스트가 완료되었는지 확인하세요!")
+        print("Consumer가 Topic에 있는 데이터를 읽어야 합니다.\n")
 
         cmd = [
             "docker", "exec", "kafka-broker-1",
@@ -96,131 +83,140 @@ class KafkaPerfTest:
 
         print(result.stdout)
         if result.stderr:
-            print("[STDERR]", result.stderr)
+            print("[에러]", result.stderr)
 
-        print(f"\n⏱️  Total Execution Time: {elapsed_time:.2f} seconds")
+        # 결과를 표 형식으로 파싱해서 출력
+        self._parse_and_print_consumer_result(result.stdout, elapsed_time)
 
-        return {
-            "test": "consumer",
-            "num_messages": num_messages,
-            "timeout_ms": timeout_ms,
-            "status": "SUCCESS" if result.returncode == 0 else "FAILED",
-            "timestamp": datetime.now().isoformat(),
-            "execution_time": elapsed_time
-        }
+    def _parse_and_print_producer_result(self, output, elapsed_time):
+        """Producer 결과를 표 형식으로 파싱 및 출력"""
+        # 결과 줄 찾기
+        result_line = None
+        for line in output.strip().split('\n'):
+            if 'records sent' in line:
+                result_line = line
+                break
 
-    def print_summary(self):
-        """Print test summary"""
-        if not self.results:
-            print("\n❌ No test results to summarize.")
+        if not result_line:
             return
 
-        print("\n" + "="*60)
-        print("📈 Test Summary")
-        print("="*60)
+        print("\n" + "="*55)
+        print("Kafka Producer 성능 분석")
+        print("="*55)
+        print("항목                       값")
+        print("─"*55)
 
-        for result in self.results:
-            if result["test"] == "producer":
-                print(f"\n✅ Producer Test")
-                print(f"   - Records: {result['num_records']:,}")
-                print(f"   - Record Size: {result['record_size']} bytes")
-                print(f"   - Status: {result['status']}")
-                print(f"   - Execution Time: {result['execution_time']:.2f}s")
+        try:
+            # 패턴 매칭으로 각 값 추출
+            records_match = re.search(r'(\d+) records sent', result_line)
+            if records_match:
+                print(f"{'전송된 메시지':<27} {int(records_match.group(1)):,}")
 
-            elif result["test"] == "consumer":
-                print(f"\n✅ Consumer Test")
-                print(f"   - Messages: {result['num_messages']:,}")
-                print(f"   - Status: {result['status']}")
-                print(f"   - Execution Time: {result['execution_time']:.2f}s")
+            records_sec_match = re.search(r'([\d.]+) records/sec', result_line)
+            if records_sec_match:
+                print(f"{'처리 속도(msg/sec)':<27} {float(records_sec_match.group(1)):,.2f}")
 
-        print("\n" + "="*60)
+            mb_sec_match = re.search(r'\(([\d.]+) MB/sec\)', result_line)
+            if mb_sec_match:
+                print(f"{'처리량(MB/sec)':<27} {float(mb_sec_match.group(1)):,.2f}")
 
-    def run_all_tests(self):
-        """Run all performance tests"""
-        print("\n" + "="*60)
-        print("🔄 Running All Kafka Performance Tests")
-        print("="*60)
+            avg_latency_match = re.search(r'([\d.]+) ms avg latency', result_line)
+            if avg_latency_match:
+                print(f"{'평균 지연(ms)':<27} {float(avg_latency_match.group(1)):,.2f}")
 
-        # Producer test
-        producer_result = self.run_producer_test(
-            num_records=100000,
-            record_size=1024,
-            acks="all"
-        )
-        self.results.append(producer_result)
+            max_latency_match = re.search(r'([\d.]+) ms max latency', result_line)
+            if max_latency_match:
+                print(f"{'최대 지연(ms)':<27} {float(max_latency_match.group(1)):,.2f}")
 
-        # Wait a bit before consumer test
-        print("\n⏳ Waiting 10 seconds before Consumer test...")
-        time.sleep(10)
+            # 실행 시간 추가
+            print(f"{'실행 시간':<27} {elapsed_time:.2f}초")
 
-        # Consumer test
-        consumer_result = self.run_consumer_test(
-            num_messages=100000,
-            timeout_ms=120000
-        )
-        self.results.append(consumer_result)
+        except Exception as e:
+            print(f"파싱 에러: {e}")
 
-        self.print_summary()
+        print("="*55)
+
+    def _parse_and_print_consumer_result(self, output, elapsed_time):
+        """Consumer 결과를 표 형식으로 파싱 및 출력"""
+        lines = output.strip().split('\n')
+
+        # 마지막 라인이 결과 데이터
+        if len(lines) < 2:
+            return
+
+        result_line = lines[-1]
+
+        headers = [
+            "시작 시간",
+            "종료 시간",
+            "소비 데이터(MB)",
+            "처리량(MB/sec)",
+            "소비 메시지 수",
+            "처리 속도(msg/sec)",
+            "Rebalance(ms)",
+            "Fetch(ms)",
+            "Fetch 처리량(MB/sec)",
+            "Fetch 속도(msg/sec)"
+        ]
+
+        values = result_line.split(", ")
+
+        if len(values) != len(headers):
+            return
+
+        print("\n" + "="*55)
+        print("Kafka Consumer 성능 분석")
+        print("="*55)
+        print("항목                       값")
+        print("─"*55)
+
+        for header, value in zip(headers, values):
+            # 숫자 포맷팅
+            try:
+                num_value = float(value)
+                if num_value > 1000:
+                    formatted = f"{num_value:,.2f}" if "." in value else f"{int(num_value):,}"
+                else:
+                    formatted = f"{num_value:.2f}" if "." in value else value
+            except:
+                formatted = value
+
+            print(f"{header:<27} {formatted}")
+
+        # 실행 시간 추가
+        print(f"{'실행 시간':<27} {elapsed_time:.2f}초")
+
+        print("="*55)
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Kafka Performance Test Suite",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python run_kafka_perf_tests.py --producer
-  python run_kafka_perf_tests.py --consumer
-  python run_kafka_perf_tests.py --all
-  python run_kafka_perf_tests.py --producer --num-records 500000 --record-size 2048
-        """
-    )
+    parser = argparse.ArgumentParser(add_help=False)
 
-    parser.add_argument("--producer", action="store_true",
-                        help="Run Producer performance test")
-    parser.add_argument("--consumer", action="store_true",
-                        help="Run Consumer performance test")
-    parser.add_argument("--all", action="store_true",
-                        help="Run all tests (Producer + Consumer)")
+    parser.add_argument("--producer", action="store_true")
+    parser.add_argument("--num-records", type=int, default=100000)
+    parser.add_argument("--record-size", type=int, default=1024)
+    parser.add_argument("--acks", type=str, default="all")
 
-    parser.add_argument("--num-records", type=int, default=100000,
-                        help="Number of records for producer test (default: 100000)")
-    parser.add_argument("--record-size", type=int, default=1024,
-                        help="Record size in bytes (default: 1024)")
-    parser.add_argument("--acks", type=str, default="all",
-                        help="Producer acks setting (default: all)")
-
-    parser.add_argument("--num-messages", type=int, default=100000,
-                        help="Number of messages for consumer test (default: 100000)")
-    parser.add_argument("--timeout", type=int, default=120000,
-                        help="Consumer timeout in ms (default: 120000)")
+    parser.add_argument("--consumer", action="store_true")
+    parser.add_argument("--num-messages", type=int, default=100000)
+    parser.add_argument("--timeout", type=int, default=120000)
 
     args = parser.parse_args()
 
     tester = KafkaPerfTest()
 
     if args.producer:
-        result = tester.run_producer_test(
+        tester.producer_test(
             num_records=args.num_records,
             record_size=args.record_size,
             acks=args.acks
         )
-        tester.results.append(result)
-        tester.print_summary()
 
     elif args.consumer:
-        result = tester.run_consumer_test(
+        tester.consumer_test(
             num_messages=args.num_messages,
             timeout_ms=args.timeout
         )
-        tester.results.append(result)
-        tester.print_summary()
-
-    elif args.all:
-        tester.run_all_tests()
-
-    else:
-        parser.print_help()
 
 
 if __name__ == "__main__":

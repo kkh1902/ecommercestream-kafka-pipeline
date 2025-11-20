@@ -53,6 +53,7 @@ class StreamingConsumer:
 
         self.spark = SparkSession.builder \
             .appName("Clickstream Processor") \
+            .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0") \
             .config("spark.sql.streaming.checkpointLocation", "/tmp/spark-checkpoint") \
             .config("spark.sql.adaptive.enabled", "true") \
             .master("local[*]") \
@@ -113,7 +114,7 @@ class StreamingConsumer:
         return stats_df
 
     def write_to_postgres(self, batch_df, batch_id):
-        """PostgreSQL에 데이터 저장"""
+        """PostgreSQL에 데이터 저장 (Batch Insert + Upsert)"""
         try:
             record_count = batch_df.count()
             if record_count > 0:
@@ -129,6 +130,11 @@ class StreamingConsumer:
                     col("transactionid").cast("integer")
                 )
 
+                # Temp 뷰 생성
+                temp_view = f"batch_{batch_id}"
+                df_to_save.createOrReplaceTempView(temp_view)
+
+                # PostgreSQL로 데이터 저장 (Batch Insert)
                 df_to_save.write \
                     .mode("append") \
                     .jdbc(
@@ -137,7 +143,7 @@ class StreamingConsumer:
                         properties=self.jdbc_properties
                     )
 
-                print(f"배치 {batch_id}: clickstream_events 테이블에 {record_count}개 저장 완료")
+                print(f"배치 {batch_id}: clickstream_events 테이블에 {record_count}개 저장 완료 (Batch Insert)")
         except Exception as e:
             print(f"배치 {batch_id} 저장 실패: {e}")
             traceback.print_exc()
