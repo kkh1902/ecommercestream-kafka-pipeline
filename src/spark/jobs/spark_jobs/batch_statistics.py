@@ -57,9 +57,14 @@ def main():
     jar_paths = ",".join([str(jar_dir / jar) for jar in jar_files])
     print(f"JAR 경로: {jar_paths}")
 
+    # SparkSubmitOperator에서 --master 파라미터로 지정되므로,
+    # 여기서는 기본값을 local로 설정 (SparkSubmitOperator가 자동으로 master를 주입)
+    # 단독 실행 시 로컬 모드, Airflow 실행 시 클러스터 모드
+    master = os.getenv('SPARK_MASTER', 'local[*]')
+
     spark = SparkSession.builder \
         .appName("BatchStatistics") \
-        .master("local[*]") \
+        .master(master) \
         .config("spark.jars", jar_paths) \
         .getOrCreate()
 

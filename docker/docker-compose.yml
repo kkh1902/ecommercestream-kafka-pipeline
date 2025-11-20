@@ -319,6 +319,108 @@ services:
       - kafka-network
     restart: unless-stopped
 
+  # ===== Spark Master =====
+  spark-master:
+    build:
+      context: ..
+      dockerfile: docker/spark-master/Dockerfile
+    container_name: spark-master
+    depends_on:
+      kafka-broker-1:
+        condition: service_healthy
+    ports:
+      - "7077:7077"
+      - "8081:8080"
+    environment:
+      SPARK_LOCAL_IP: spark-master
+      SPARK_MASTER_HOST: spark-master
+      SPARK_MASTER_PORT: 7077
+      SPARK_MASTER_WEBUI_PORT: 8080
+    volumes:
+      - ../src:/app/src
+      - ../config:/app/config
+      - ../requirements.txt:/app/requirements.txt
+    networks:
+      - kafka-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ===== Spark Worker 1 =====
+  spark-worker-1:
+    build:
+      context: ..
+      dockerfile: docker/spark-worker/Dockerfile
+    container_name: spark-worker-1
+    depends_on:
+      spark-master:
+        condition: service_started
+    ports:
+      - "8082:8080"
+    environment:
+      SPARK_LOCAL_IP: spark-worker-1
+      SPARK_WORKER_MEMORY: 2g
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_WEBUI_PORT: 8080
+    volumes:
+      - ../src:/app/src
+      - ../config:/app/config
+      - ../requirements.txt:/app/requirements.txt
+    networks:
+      - kafka-network
+    restart: unless-stopped
+
+  # ===== Spark Worker 2 =====
+  spark-worker-2:
+    build:
+      context: ..
+      dockerfile: docker/spark-worker/Dockerfile
+    container_name: spark-worker-2
+    depends_on:
+      spark-master:
+        condition: service_started
+    ports:
+      - "8083:8080"
+    environment:
+      SPARK_LOCAL_IP: spark-worker-2
+      SPARK_WORKER_MEMORY: 2g
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_WEBUI_PORT: 8080
+    volumes:
+      - ../src:/app/src
+      - ../config:/app/config
+      - ../requirements.txt:/app/requirements.txt
+    networks:
+      - kafka-network
+    restart: unless-stopped
+
+  # ===== Spark Worker 3 =====
+  spark-worker-3:
+    build:
+      context: ..
+      dockerfile: docker/spark-worker/Dockerfile
+    container_name: spark-worker-3
+    depends_on:
+      spark-master:
+        condition: service_started
+    ports:
+      - "8084:8080"
+    environment:
+      SPARK_LOCAL_IP: spark-worker-3
+      SPARK_WORKER_MEMORY: 2g
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_WEBUI_PORT: 8080
+    volumes:
+      - ../src:/app/src
+      - ../config:/app/config
+      - ../requirements.txt:/app/requirements.txt
+    networks:
+      - kafka-network
+    restart: unless-stopped
+
   # ===== Spark Streaming Consumer =====
   spark-streaming:
     build:
@@ -348,7 +450,7 @@ services:
       - ../airflow:/app/airflow
       - ../requirements.txt:/app/requirements.txt
       - ../logs:/app/logs
-    command: spark-submit --master local[*] --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.2,org.postgresql:postgresql:42.6.0 /app/src/consumer/streaming_consumer.py
+    command: spark-submit --master spark://spark-master:7077 --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.2,org.postgresql:postgresql:42.6.0 /app/src/consumer/streaming_consumer.py
     networks:
       - kafka-network
     restart: unless-stopped

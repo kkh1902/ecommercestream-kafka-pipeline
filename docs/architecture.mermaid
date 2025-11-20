@@ -1,66 +1,100 @@
 graph TB
-    subgraph Ingestion["📥 Data Ingestion"]
-        P["Producer<br/>(producer.py)<br/>CSV → Kafka"]
+    subgraph Data["📊 Data Source"]
+        CSV["CSV File<br/>(2.7M rows)<br/>events.csv"]
     end
 
-    subgraph Messaging["📨 Message Broker"]
-        T["Apache Kafka<br/>Topic: clickstream"]
+    subgraph Producer["📤 Producer"]
+        P["producer.py<br/>- CSV 읽기<br/>- 데이터 검증<br/>- Kafka 전송"]
     end
 
-    subgraph Streaming["🔄 Real-time Streaming"]
-        C1["Consumer 1<br/>(consumer_postgres.py)<br/>원본 저장"]
-        C2["Consumer 2<br/>(consumer_spark_streaming.py)<br/>통계 처리"]
+    subgraph Kafka["📨 Kafka Cluster"]
+        ZK["Zookeeper<br/>(코디네이션)"]
+        KB1["Kafka Broker 1<br/>:9092"]
+        KB2["Kafka Broker 2<br/>:9093"]
+        KB3["Kafka Broker 3<br/>:9094"]
+        T1["Topic: clickstream<br/>(3 replicas)"]
+        T2["Topic: error_data<br/>(에러 처리)"]
     end
 
-    subgraph Storage["💾 Data Storage - PostgreSQL"]
-        RAW["raw_events<br/>(원본)"]
-        STATS["statistics_events<br/>(통계/BI용)"]
+    subgraph Consumer["🔄 Consumer Layer"]
+        C1["consumer_postgres.py<br/>- Kafka 메시지 수신<br/>- 배치 처리 100개<br/>- PostgreSQL 저장"]
+        C2["streaming_consumer.py<br/>(미사용)<br/>Spark Streaming 방식"]
     end
 
-    subgraph BatchML["⚙️ Batch Processing - Airflow"]
-        DAG1["data_quality_management<br/>(매일 새벽 1시)<br/>데이터 품질 검증"]
-        DAG3["daily_statistics_management<br/>(매일 새벽 3시)<br/>통계 집계"]
-        DAG4["ml_training_pipeline<br/>(매주 월요일 새벽 4시)<br/>추천 모델 학습"]
+    subgraph Storage["💾 PostgreSQL"]
+        DB1["clickstream_events<br/>(원본 이벤트)"]
+        DB2["daily_statistics<br/>(일일 통계)"]
+        DB3["schema.sql<br/>(테이블 정의)"]
     end
 
-    subgraph ML["🤖 Machine Learning"]
-        MLDATA["recommendation_data.py<br/>데이터 준비"]
-        MLMODEL["recommendation_model.py<br/>XGBoost 학습"]
-        MLEVAL["recommendation_metrics.py<br/>평가 지표"]
-        MLENGINE["recommendation_engine.py<br/>추천 생성"]
+    subgraph Batch["⚙️ Batch Processing"]
+        AIRFLOW["Airflow DAG<br/>daily_statistics_batch<br/>(매일 새벽 2시)"]
+        SPARK["Spark Job<br/>batch_statistics.py<br/>- local[*] 모드<br/>- 일별 통계 계산<br/>- 데이터 검증"]
     end
 
-    subgraph Analytics["📈 Analytics & BI"]
-        DASH["BI Dashboard<br/>통계 시각화"]
+    subgraph Monitoring["📈 Monitoring & Error"]
+        KAFKAUI["Kafka UI<br/>:8090<br/>- 토픽 모니터링<br/>- lag 확인"]
+        ERROR["error_data Topic<br/>- 에러 메시지 수집<br/>- 중앙 집중식 관리"]
+        LOGS["Logs<br/>- producer.log<br/>- consumer.log<br/>- spark.log"]
     end
 
-    P -->|Kafka Protocol| T
-    T -->|Subscribe| C1
-    T -->|Subscribe| C2
+    subgraph Docker["🐳 Docker"]
+        COMPOSE["docker-compose.yml<br/>- 전체 오케스트레이션<br/>- 자동 재시작"]
+    end
 
-    C1 -->|Batch Insert| RAW
-    C2 -->|특성 추가| STATS
+    %% Data Flow
+    CSV -->|읽기| P
+    P -->|Kafka Protocol| T1
 
-    RAW --> DAG1
-    RAW --> DAG3
-    RAW --> DAG4
+    %% Kafka Flow
+    ZK -->|관리| KB1 & KB2 & KB3
+    KB1 & KB2 & KB3 -->|저장| T1
 
-    DAG4 -->|raw_events 읽기| MLDATA
-    MLDATA -->|특성 엔지니어링| MLMODEL
-    MLMODEL -->|평가| MLEVAL
-    MLEVAL -->|확률 계산| MLENGINE
+    %% Error Handling
+    P -->|실패| T2
+    C1 -->|실패| T2
+    SPARK -->|실패| T2
+    T2 -->|모니터링| KAFKAUI
+    T2 -->|저장| ERROR
 
-    STATS --> DASH
+    %% Consumer Flow
+    T1 -->|구독| C1
+    T1 -->|구독| C2
 
-    style P fill:#e1f5ff
-    style C1 fill:#e1f5ff
+    %% Storage
+    C1 -->|Batch Insert<br/>100개씩| DB1
+    SPARK -->|통계 저장| DB2
+
+    %% Batch Processing
+    DB1 -->|데이터 읽기| AIRFLOW
+    AIRFLOW -->|실행| SPARK
+    SPARK -->|로그| LOGS
+
+    %% Monitoring
+    T1 -->|메시지 흐름| KAFKAUI
+    C1 -->|상태| KAFKAUI
+    SPARK -->|상태| KAFKAUI
+    DB1 -->|모니터링| LOGS
+
+    %% Docker
+    COMPOSE -.->|실행| Producer & Kafka & Consumer & Storage & Batch
+
+    %% Styling
+    style CSV fill:#e3f2fd
+    style P fill:#bbdefb
+    style T1 fill:#90caf9
+    style T2 fill:#ff8a80
+    style C1 fill:#81c784
     style C2 fill:#fff9c4
-    style RAW fill:#f0f0f0
-    style STATS fill:#f0f0f0
-    style DAG1 fill:#ffe0b2
-    style DAG3 fill:#ffe0b2
-    style DAG4 fill:#c8e6c9
-    style MLDATA fill:#c8e6c9
-    style MLMODEL fill:#c8e6c9
-    style MLEVAL fill:#c8e6c9
-    style MLENGINE fill:#c8e6c9
+    style DB1 fill:#f0f0f0
+    style DB2 fill:#f0f0f0
+    style AIRFLOW fill:#ffe0b2
+    style SPARK fill:#ffcc80
+    style KAFKAUI fill:#b39ddb
+    style ERROR fill:#ffccbc
+    style LOGS fill:#d0d0d0
+    style COMPOSE fill:#b0bec5
+    style ZK fill:#90caf9
+    style KB1 fill:#90caf9
+    style KB2 fill:#90caf9
+    style KB3 fill:#90caf9
