@@ -1,0 +1,22 @@
+{
+  "timestamp": "2025-11-22T07:20:41.332904",
+  "producer": {
+    "sample_size": 200000,
+    "duration_seconds": 15.665212392807007,
+    "throughput_events_per_sec": 12767.142569470298,
+    "status": "SUCCESS"
+  },
+  "consumer": {
+    "initial_count": 50382400,
+    "final_count": 50382400,
+    "total_processed": 0,
+    "duration_seconds": 182.18232011795044,
+    "avg_throughput_events_per_sec": 0.0,
+    "measurements": []
+  },
+  "system_metrics": {},
+  "summary": {
+    "target_throughput": 10000,
+    "current_throughput": 0.0
+  }
+}

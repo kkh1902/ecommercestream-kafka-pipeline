@@ -1,0 +1,20 @@
+{
+  "legacy": {
+    "method": "단일 Connection (구)",
+    "iterations": 5,
+    "avg_time_ms": 73.39714000700042,
+    "min_time_ms": 59.071000025141984,
+    "max_time_ms": 89.37910001259297,
+    "std_dev_ms": 14.566875005844327,
+    "total_time_ms": 366.9857000350021
+  },
+  "pool": {
+    "method": "Connection Pool (신)",
+    "iterations": 5,
+    "avg_time_ms": 62.22810000181198,
+    "min_time_ms": 52.157800004351884,
+    "max_time_ms": 72.15969997923821,
+    "std_dev_ms": 8.222214982616581,
+    "total_time_ms": 311.1405000090599
+  }
+}
