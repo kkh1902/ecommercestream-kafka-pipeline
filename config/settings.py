@@ -5,7 +5,7 @@ load_dotenv()
 
 # Kafka 설정
 KAFKA_BROKERS = os.getenv('KAFKA_BROKERS', 'localhost:9092').split(',')
-KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'clickstream')
+KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'perf-test')
 
 # File Paths
 CSV_FILE_PATH = os.getenv('CSV_FILE_PATH', 'data/raw/events.csv')
