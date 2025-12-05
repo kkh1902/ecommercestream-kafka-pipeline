@@ -91,11 +91,17 @@ ML 피처 생성 완료: 어제 데이터 (1일)
 
 ### Slack 웹훅 URL
 
-Slack 웹훅 URL은 `conftest.py`에 정의되어 있습니다:
+Slack 웹훅 URL은 환경 변수에서 읽혀집니다. 다음 환경 변수를 설정해야 합니다:
 
-```python
-SLACK_DAILY_STATS_WEBHOOK = "SLACK_WEBHOOK_REMOVED"
-SLACK_ML_FEATURES_WEBHOOK = "SLACK_WEBHOOK_REMOVED"
+```bash
+export SLACK_DAILY_STATS_WEBHOOK="https://hooks.slack.com/services/YOUR_WORKSPACE_ID/YOUR_CHANNEL_ID/YOUR_TOKEN"
+export SLACK_ML_FEATURES_WEBHOOK="https://hooks.slack.com/services/YOUR_WORKSPACE_ID/YOUR_CHANNEL_ID/YOUR_TOKEN"
+```
+
+또는 `.env` 파일에 설정:
+```
+SLACK_DAILY_STATS_WEBHOOK=https://hooks.slack.com/services/...
+SLACK_ML_FEATURES_WEBHOOK=https://hooks.slack.com/services/...
 ```
 
 ### pytest 픽스처

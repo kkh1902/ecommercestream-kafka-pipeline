@@ -15,11 +15,14 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 # ===== Slack 웹훅 설정 =====
 
+# 환경 변수에서 읽기
+import os
+
 # 통계 DAG Slack 웹훅
-SLACK_DAILY_STATS_WEBHOOK = "SLACK_WEBHOOK_REMOVED"
+SLACK_DAILY_STATS_WEBHOOK = os.getenv("SLACK_DAILY_STATS_WEBHOOK", "")
 
 # ML 피처 DAG Slack 웹훅
-SLACK_ML_FEATURES_WEBHOOK = "SLACK_WEBHOOK_REMOVED"
+SLACK_ML_FEATURES_WEBHOOK = os.getenv("SLACK_ML_FEATURES_WEBHOOK", "")
 
 
 # ===== Pytest 픽스처 =====

@@ -19,9 +19,11 @@ import json
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# Slack 웹훅 URL (실제 테스트용)
-SLACK_DAILY_STATS_WEBHOOK = "SLACK_WEBHOOK_REMOVED"
-SLACK_ML_FEATURES_WEBHOOK = "SLACK_WEBHOOK_REMOVED"
+# Slack 웹훅 URL (환경 변수에서 읽음)
+import os
+
+SLACK_DAILY_STATS_WEBHOOK = os.getenv("SLACK_DAILY_STATS_WEBHOOK", "")
+SLACK_ML_FEATURES_WEBHOOK = os.getenv("SLACK_ML_FEATURES_WEBHOOK", "")
 
 
 class TestSlackNotifications:
